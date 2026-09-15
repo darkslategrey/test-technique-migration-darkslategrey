@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-ruby ">= 3.1"
+ruby ">= 3.2"
 
 gem "activerecord", "~> 7.1"
 gem "activesupport", "~> 7.1"
