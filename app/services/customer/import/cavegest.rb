@@ -7,6 +7,8 @@ class Customer::Import::Cavegest < Importer::Base
     imported = 0
 
     sheet.parse(headers: true).drop(1).each do |row|
+      country_code = N.country_code(row["Pays"])
+
       Customer.create!(
         reference:         N.text(row["Code"]),
         company_name:      N.text(row["Libellé"]),
@@ -14,8 +16,8 @@ class Customer::Import::Cavegest < Importer::Base
         last_name:         N.text(row["Nom"]),
         address1:          N.text(row["Adresse"]),
         city:              N.text(row["Ville"]),
-        zip:               N.zip(row["Code postal"]),
-        country_code:      row["Pays"],
+        zip:               N.zip(row["Code postal"], country_code),
+        country_code:      country_code,
         phone:             row["Téléphone 1"].to_s,
         mobile:            row["Téléphone 2"].to_s,
         email:             row["EMail"].to_s,
