@@ -1,4 +1,5 @@
 require "bundler/setup"
+require "dotenv/load"
 require "active_record"
 require "active_support/all"
 require "bigdecimal/util"
