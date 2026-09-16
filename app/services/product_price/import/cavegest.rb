@@ -48,7 +48,8 @@ class ProductPrice::Import::Cavegest < Importer::Base
     @data_rows ||= begin
       rows = CSV.read(path, encoding: ENCODING, col_sep: COLUMN_SEP)
       header_index = rows.index { |r| r[0] == "Ref" }
-      raw = header_index ? rows[(header_index + 1)..] : []
+      raise ArgumentError, "En-tête 'Ref' introuvable dans le fichier #{path}" unless header_index
+      raw = rows[(header_index + 1)..]
       raw.reject do |r|
         structural?(r) || empty_line?(r)
       end
