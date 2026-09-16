@@ -3,7 +3,6 @@ class ProductPrice::Import::Cavegest < Importer::Base
 
   COLUMN_SEP = ";".freeze
   GRID_CODES = %w[DEPC CHR EXPO PART SALON].freeze
-  GRID_INDEX = { "DEPC" => 5, "CHR" => 6, "EXPO" => 7, "PART" => 8, "SALON" => 9 }.freeze
 
   ENCODING = Encoding::ISO_8859_1
 
@@ -49,10 +48,24 @@ class ProductPrice::Import::Cavegest < Importer::Base
       rows = CSV.read(path, encoding: ENCODING, col_sep: COLUMN_SEP)
       header_index = rows.index { |r| r[0] == "Ref" }
       raise ArgumentError, "En-tête 'Ref' introuvable dans le fichier #{path}" unless header_index
+      @header_row = rows[header_index]
       raw = rows[(header_index + 1)..]
       raw.reject do |r|
         structural?(r) || empty_line?(r)
       end
+    end
+  end
+
+  def header_row
+    @header_row || (data_rows; @header_row)
+  end
+
+  # Index dynamique des colonnes de grilles, dérivé de l'en-tête réel.
+  def grid_index
+    @grid_index ||= GRID_CODES.to_h do |code|
+      idx = header_row.index(code)
+      raise ArgumentError, "Colonne '#{code}' introuvable dans l'en-tête" unless idx
+      [code, idx]
     end
   end
 
@@ -90,7 +103,7 @@ class ProductPrice::Import::Cavegest < Importer::Base
       volume:    to_utf8(N.text(row[2])),
       vat_rate:  to_utf8(N.text(row[4])),
       stock:     N.decimal(row[10]).to_i,
-      prices:    GRID_CODES.to_h { |g| [g, N.decimal(row[GRID_INDEX[g]])] }
+      prices:    GRID_CODES.to_h { |g| [g, N.decimal(row[grid_index[g]])] }
     }
   end
 
@@ -115,7 +128,7 @@ class ProductPrice::Import::Cavegest < Importer::Base
 
   def import_prices(product, row)
     GRID_CODES.each do |grid_code|
-      value = N.decimal(row[GRID_INDEX[grid_code]])
+      value = N.decimal(row[grid_index[grid_code]])
       next if value.nil? || value.zero?
 
       coefficient = VAT_COEFFICIENTS.fetch(product.vat_rate.to_f, 1.0)
