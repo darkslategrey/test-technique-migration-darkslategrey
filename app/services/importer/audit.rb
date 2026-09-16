@@ -33,9 +33,7 @@ class Importer::Audit
 
   def checks
     [
-      -> { count_check("Clients avec une grille tarifaire sans grille correspondante",
-           Customer.where.not(price_grid_code: nil)
-                   .where.not(price_grid_code: grid_codes).count) },
+      -> { unknown_grids_check },
       -> { count_check("Produits sans aucun prix",
            Product.left_joins(:product_prices).where(product_prices: { id: nil }).count) },
       -> { count_check("Prix à 0", ProductPrice.where(amount_ht: 0).count) },
@@ -46,12 +44,7 @@ class Importer::Audit
       -> { count_check("Codes postaux non-5 chiffres (hors BE)",
            Customer.where.not(country_code: "BE").where.not(zip: nil)
                    .select { |c| c.zip !~ /\A\d{5}\z/ }.size) },
-      -> { count_check("Produits dont la référence a été renommée (doublon d'export)",
-           Product.where("reference LIKE '%-%'").count) },
-      -> { count_check("Clients sur la grille GDCPT (grille absente des tarifs)",
-           Customer.where(price_grid_code: "GDCPT").count) },
-      -> { count_check("Numéros de TVA avec espaces résiduels",
-           Customer.where.not(vat_number: nil).select { |c| c.vat_number.include?(" ") }.size) }
+      -> { renamed_products_check }
     ]
   end
 
@@ -59,6 +52,33 @@ class Importer::Audit
     return nil if count.zero?
 
     "#{label} : #{count}"
+  end
+
+  def unknown_grids_check
+    bad = Customer.where.not(price_grid_code: nil)
+                  .where.not(price_grid_code: grid_codes)
+                  .group(:price_grid_code)
+    return nil if bad.count.empty?
+
+    lines = ["Clients avec une grille tarifaire inconnue (absente des tarifs) :"]
+    bad.count.each do |grid, count|
+      refs = Customer.where(price_grid_code: grid).order(:reference).pluck(:reference)
+      lines << "  #{grid} (#{count}) : #{refs.join(", ")}"
+    end
+    lines.join("\n")
+  end
+
+  def renamed_products_check
+    products = Product.where("reference LIKE '%-%'").order(:reference)
+    return nil if products.count.zero?
+
+    groups = products.group_by { |p| p.reference.split("-").first }
+    lines = ["Produits dont la référence a été renommée (doublon d'export) : #{products.count}"]
+    groups.each do |original, renamed|
+      refs = renamed.map(&:reference).join(", ")
+      lines << "  #{original} → #{refs}"
+    end
+    lines.join("\n")
   end
 
   def grid_codes
