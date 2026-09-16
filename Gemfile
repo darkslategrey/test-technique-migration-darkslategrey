@@ -13,4 +13,5 @@ gem "roo", "~> 2.10"
 group :development, :test do
   gem "pry"
   gem "rspec", "~> 3.13"
+  gem "rubocop", "~> 1.91", require: false
 end
