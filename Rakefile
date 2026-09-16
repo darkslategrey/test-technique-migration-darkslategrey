@@ -19,8 +19,8 @@ namespace :db do
 end
 
 namespace :import do
-  desc "Rejoue la reprise complète (tarifs, tiers, contrôles)"
-  task all: ["import:product_price:cavegest", "import:customer:cavegest", "import:report"]
+  desc "Rejoue la reprise complète (tarifs, tiers, rapport synthétique, contrôles)"
+  task all: ["import:report_imports", "report:audit"]
 end
 
 task default: :spec
