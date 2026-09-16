@@ -43,8 +43,7 @@ class Importer::Audit
            Customer.where.not(country_code: [nil, "FR", "BE", "DE"]).count) },
       -> { count_check("Codes postaux non-5 chiffres (hors BE)",
            Customer.where.not(country_code: "BE").where.not(zip: nil)
-                   .select { |c| c.zip !~ /\A\d{5}\z/ }.size) },
-      -> { renamed_products_check }
+                   .select { |c| c.zip !~ /\A\d{5}\z/ }.size) }
     ]
   end
 
@@ -64,19 +63,6 @@ class Importer::Audit
     bad.count.each do |grid, count|
       refs = Customer.where(price_grid_code: grid).order(:reference).pluck(:reference)
       lines << "  #{grid} (#{count}) : #{refs.join(", ")}"
-    end
-    lines.join("\n")
-  end
-
-  def renamed_products_check
-    products = Product.where("reference LIKE '%-%'").order(:reference)
-    return nil if products.count.zero?
-
-    groups = products.group_by { |p| p.reference.split("-").first }
-    lines = ["Produits dont la référence a été renommée (doublon d'export) : #{products.count}"]
-    groups.each do |original, renamed|
-      refs = renamed.map(&:reference).join(", ")
-      lines << "  #{original} → #{refs}"
     end
     lines.join("\n")
   end

@@ -62,21 +62,6 @@ pas développeuse.
 
 ---
 
-## Notes de reprise
-
-Ajoutez une courte section « Notes de reprise » à la fin de votre README, ou
-dans un fichier poussé sur le repo. Nous y cherchons ce qu'un collègue
-écrirait avant de partir en week-end :
-
-- ce que vous avez décidé sur les cas où les fichiers ne tranchaient pas ;
-- ce que vous feriez confirmer par le client avant de lancer la reprise en
-  réel.
-
-Quelques phrases suffisent. Nous ne cherchons pas un rapport, mais à comprendre
-vos arbitrages sans avoir à les deviner dans le code.
-
----
-
 ## Précisions
 
 Le schéma, les modèles et l'architecture sont modifiables, y compris en
@@ -86,3 +71,71 @@ simplement pourquoi.
 Les gems aussi : `roo` est une suggestion, pas une contrainte.
 
 Bon courage.
+
+---
+
+## Notes de reprise
+
+### Décisions prises au fil de la reprise
+
+- Type de tiers (R = REVENDEUR) : mappé sur `customer`, avec
+  `customer_category = "REVENDEUR"` qui conserve l'information d'origine
+  (982 lignes).
+
+- Doublons de référence produits : 6 références apparaissent plusieurs fois
+  dans l'export (CUV227, CUV228, HAU214, LES194, TER232, VIENM6), avec des
+  noms ou volumes différents. La référence étant l'identifiant métier unique
+  du produit, on ne peut pas trancher à la place du client. Plutôt que
+  d'inventer une référence dérivée ou d'écraser silencieusement, ces produits
+  sont **rejetés explicitement** et listés avec le détail de chaque ligne dans
+  le rapport. Le client doit corriger sa référence avant la reprise.
+
+- Prix EXPO exprimés TTC : convertis en HT en divisant par le coefficient de
+  TVA du produit (20 % -> /1,2 ; 5,5 % -> /1,055), arrondis à 2 décimales.
+  Les autres grilles sont lues en HT directement.
+
+- Numéros de TVA : normalisés à l'import (espaces retirés, lettres en
+  majuscules, ex. `FR 43 313181739` -> `FR43313181739`).
+
+- Volumes : exprimés en centilitres dans le fichier, convertis en
+  millilitres (x10). Les contenants non volumétriques (Carton, `6 x 75`,
+  vide) renvoient `volume_ml = nil`.
+
+- Lignes vides et lignes de structure (tarifs) : ignorées silencieusement,
+  pour ne pas noyer le rapport de bruit.
+
+- Clients sans identité : lignes avec une référence mais sans nom, prénom ou
+  raison sociale (3 cas) : rejetées explicitement et listées dans le rapport,
+  plutôt qu'un échec silencieux.
+
+- Idempotence : l'import est rejouable sans dégât (upsert sur référence pour
+  les clients, upsert produit + tarif pour les tarifs, index d'unicité).
+  Un second `rake import:all` ne crée rien de plus.
+
+- Données douteuses : stockées telles quelles en base et listées dans l'audit
+  de cohérence (grilles inconnues, clients sans email) pour être traitées par un
+  humain, plutôt qu'écrasées.
+
+### Points à confirmer avec le client
+
+- Grille inconnue `GDCPT` (5 clients, « GRANDS COMPTES ») : grille absente
+  des tarifs. Faut-il la créer, ou la rattacher à une grille existante
+  (`PART` / `DEPC`) ?
+
+- Emails génériques `contact@baqio.fake` (497 clients) : adresses
+  manifestement factices. Faut-il les passer à `nil` plutôt que de les
+  conserver (risque d'envoi d'emails à des adresses inertes) ?
+
+- Grilles tarifaires vides : `SALON` est vide pour la plupart des produits et
+  `PART` pour quelques-uns. Normal si `SALON` ne sert qu'à l'événementiel,
+  à confirmer.
+
+- Clients inutilisables : le fichier marque 340 clients inutilisables.
+  Faut-il les importer avec `active = false` ou les écarter ?
+
+- Doublons clients exacts : quelques références apparaissent en double dans
+  l'export sans différence. Traités comme des doublons d'export (le second
+  import met à jour sans changement), à confirmer.
+
+- Pays manquant : 992 clients sans code pays. Faut-il leur affecter un pays
+  par défaut ou les laisser sans ?
