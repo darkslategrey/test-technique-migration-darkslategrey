@@ -18,13 +18,14 @@ class ProductPrice::Import::Cavegest < Importer::Base
       base_reference = N.text(row[0])
       next if base_reference.nil?
 
-      reference = unique_reference(base_reference, row)
-      product   = build_product(reference, row)
-      product.save!
+      reference = resolve_reference(base_reference, row)
+      product   = upsert_product(reference, row)
       import_prices(product, row)
+      report.count(:products_imported)
       imported += 1
     rescue ActiveRecord::RecordInvalid => e
       report.error(source: "tarifs", locator: base_reference, message: e.message)
+      report.count(:products_rejected)
       skipped += 1
     end
 
@@ -39,33 +40,56 @@ class ProductPrice::Import::Cavegest < Importer::Base
       header_index = rows.index { |r| r[0] == "Ref" }
       raw = header_index ? rows[(header_index + 1)..] : []
       raw.reject do |r|
-        r[0].to_s.start_with?("---", "SOUS-TOTAL") || r[0].to_s.strip.empty?
+        structural?(r) || empty_line?(r)
       end
     end
+  end
+
+  def structural?(row)
+    row[0].to_s.start_with?("---", "SOUS-TOTAL")
+  end
+
+  def empty_line?(row)
+    row[0].to_s.strip.empty?
   end
 
   def row_volume_ml(row)
     volume_ml(row[2])
   end
 
-  # La référence peut être dupliquée dans l'export avec un contenant différent
-  # (ex. CUV227 en Bouteille puis en Magnum). On suffixe la 2e occurrence.
-  def unique_reference(base_reference, row)
-    return base_reference unless Product.exists?(reference: base_reference)
-
-    suffix = row_volume_ml(row) ? "#{row_volume_ml(row)}ML" : "NOVOL"
-    "#{base_reference}-#{suffix}"
+  def row_occurrences
+    @row_occurrences ||= data_rows.each_with_object(Hash.new(0)) do |row, counts|
+      ref = N.text(row[0])
+      counts[ref] += 1 if ref
+    end
   end
 
-  def build_product(reference, row)
-    Product.new(
-      reference: reference,
+  # Une référence peut être dupliquée dans l'export (ex. HAU214 apparaît 2x,
+  # parfois avec le même contenant). On suffixe par un index d'occurrence stable
+  # (ex. CUV227-2, HAU214-2) pour garantir une référence unique par ligne,
+  # retrouvée au re-run -> l'import est idempotent.
+  def resolve_reference(base_reference, row)
+    return base_reference if row_occurrences[base_reference] <= 1
+
+    occurrence_counter[base_reference] += 1
+    "#{base_reference}-#{occurrence_counter[base_reference]}"
+  end
+
+  def occurrence_counter
+    @occurrence_counter ||= Hash.new(0)
+  end
+
+  def upsert_product(reference, row)
+    product = Product.find_or_initialize_by(reference: reference)
+    product.assign_attributes(
       name:      N.text(row[1]),
       color:     N.text(row[3]),
       volume_ml: row_volume_ml(row),
       vat_rate:  N.decimal(row[4]),
       stock:     N.decimal(row[10]).to_i
     )
+    product.save!
+    product
   end
 
   def import_prices(product, row)
@@ -76,11 +100,9 @@ class ProductPrice::Import::Cavegest < Importer::Base
       coefficient = VAT_COEFFICIENTS.fetch(product.vat_rate.to_f, 1.0)
       amount = grid_code == "EXPO" ? value / coefficient : value
 
-      ProductPrice.create!(
-        product:   product,
-        grid_code: grid_code,
-        amount_ht: amount.round(2)
-      )
+      price = ProductPrice.find_or_initialize_by(product: product, grid_code: grid_code)
+      price.amount_ht = amount.round(2)
+      price.save!
     end
   end
 
