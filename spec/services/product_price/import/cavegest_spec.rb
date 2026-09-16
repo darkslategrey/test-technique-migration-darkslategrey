@@ -50,4 +50,20 @@ RSpec.describe ProductPrice::Import::Cavegest do
     product = Product.find_by(reference: "LANM3")
     expect(product.vat_rate).to eq(20.0)
   end
+
+  it "rejects products sharing a duplicate reference" do
+    # CUV227, HAU214, ... apparaissent plusieurs fois : aucun produit n'est créé.
+    %w[CUV227 CUV228 HAU214 LES194 TER232 VIENM6].each do |ref|
+      expect(Product.find_by(reference: ref)).to be_nil
+      expect(ProductPrice.where(grid_code: nil).count).to eq(0)
+    end
+  end
+
+  it "counts duplicate-reference conflicts in the report" do
+    report = MigrationReport.new
+    described_class.new(path, report: report).call
+
+    expect(report.counters[:product_conflict]).to eq(12)
+    expect(report.warnings.size + report.errors.size).to be >= 12
+  end
 end

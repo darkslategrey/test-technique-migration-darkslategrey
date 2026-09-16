@@ -23,6 +23,16 @@ class MigrationReport
   def errors   = issues.select { |issue| issue.level == :error }
   def warnings = issues.select { |issue| issue.level == :warning }
 
+  # Libellés lisibles (non-dev) pour les compteurs techniques.
+  COUNT_LABELS = {
+    products_imported:  "Produits importés",
+    product_conflict:   "Références en conflit rejetées",
+    products_rejected:  "Produits rejetés",
+    lines_ignored:      "Lignes non tarifaires ignorées",
+    customers_imported: "Clients importés",
+    customers_skipped:  "Clients rejetés"
+  }.freeze
+
   def to_s
     lines = []
     lines << "===== Rapport de reprise ====="
@@ -58,10 +68,25 @@ class MigrationReport
   end
 
   def format_key(key)
-    key.to_s.tr("_", " ").capitalize
+    COUNT_LABELS.fetch(key, key.to_s.tr("_", " ").capitalize)
   end
 
   def format_issue(issue)
-    "[#{issue.source}] #{issue.locator}: #{issue.message}"
+    line = "[#{issue.source}] #{issue.locator}: #{issue.message}"
+    return line if issue.details.empty?
+
+    body = issue.details.map do |(key, value)|
+      "    #{key}: #{format_detail(value)}"
+    end
+    ([line] + body).join("\n")
+  end
+
+  def format_detail(value)
+    case value
+    when Hash
+      value.map { |k, v| "#{k}=#{v}" }.join(", ")
+    else
+      value
+    end
   end
 end

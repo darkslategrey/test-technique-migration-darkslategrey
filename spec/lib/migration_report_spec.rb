@@ -4,12 +4,12 @@ RSpec.describe MigrationReport do
   subject(:report) { described_class.new }
 
   it "renders counters as a readable non-dev summary" do
-    report.count(:customers_created, 12)
+    report.count(:customers_imported, 12)
     report.count(:products_imported, 5)
 
     text = report.to_s
-    expect(text).to include("Customers created : 12")
-    expect(text).to include("Products imported : 5")
+    expect(text).to include("Clients importés : 12")
+    expect(text).to include("Produits importés : 5")
   end
 
   it "renders warnings under a 'à vérifier' section" do

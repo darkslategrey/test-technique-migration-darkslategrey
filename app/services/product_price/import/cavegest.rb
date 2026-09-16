@@ -12,24 +12,35 @@ class ProductPrice::Import::Cavegest < Importer::Base
 
   def call
     imported = 0
-    skipped  = 0
+    rejected = 0
 
     data_rows.each do |row|
-      base_reference = N.text(row[0])
-      next if base_reference.nil?
+      reference = N.text(row[0])
+      next if reference.nil?
 
-      reference = resolve_reference(base_reference, row)
-      product   = upsert_product(reference, row)
+      # Une référence partagée par plusieurs lignes est une donnée source à
+      # faire trancher par le client : on rejette explicitement, sans inventer
+      # d'identifiant ni écraser silencieusement.
+      if conflict_references.include?(reference)
+        report.count(:product_conflict)
+        report.error(source: "tarifs", locator: reference,
+                     message: "référence partagée par plusieurs lignes — à corriger côté client",
+                     details: row_details(row))
+        rejected += 1
+        next
+      end
+
+      product = upsert_product(reference, row)
       import_prices(product, row)
       report.count(:products_imported)
       imported += 1
     rescue ActiveRecord::RecordInvalid => e
-      report.error(source: "tarifs", locator: base_reference, message: e.message)
+      report.error(source: "tarifs", locator: reference, message: e.message)
       report.count(:products_rejected)
-      skipped += 1
+      rejected += 1
     end
 
-    puts "#{imported} produits importés, #{skipped} rejetés"
+    puts "#{imported} produits importés, #{rejected} rejetés (dont #{conflict_references.size} références partagées)"
   end
 
   private
@@ -57,26 +68,36 @@ class ProductPrice::Import::Cavegest < Importer::Base
     volume_ml(row[2])
   end
 
-  def row_occurrences
-    @row_occurrences ||= data_rows.each_with_object(Hash.new(0)) do |row, counts|
-      ref = N.text(row[0])
-      counts[ref] += 1 if ref
-    end
+  # Tous les numéros de référence qui apparaissent plus d'une fois dans
+  # l'export. Ces doublons constituent une ambigüité que l'import ne doit pas
+  # trancher seul : on les écarte et on les escalade.
+  def conflict_references
+    @conflict_references ||= data_rows
+      .each_with_object(Hash.new(0)) do |row, counts|
+        ref = N.text(row[0])
+        counts[ref] += 1 if ref
+      end
+      .select { |_ref, count| count > 1 }
+      .keys
   end
 
-  # Une référence peut être dupliquée dans l'export (ex. HAU214 apparaît 2x,
-  # parfois avec le même contenant). On suffixe par un index d'occurrence stable
-  # (ex. CUV227-2, HAU214-2) pour garantir une référence unique par ligne,
-  # retrouvée au re-run -> l'import est idempotent.
-  def resolve_reference(base_reference, row)
-    return base_reference if row_occurrences[base_reference] <= 1
-
-    occurrence_counter[base_reference] += 1
-    "#{base_reference}-#{occurrence_counter[base_reference]}"
+  # Rend une ligne du fichier lisible dans le rapport (référence, nom, volume,
+  # TVA, stocks et tarifs).
+  def row_details(row)
+    {
+      reference: to_utf8(N.text(row[0])),
+      name:      to_utf8(N.text(row[1])),
+      volume:    to_utf8(N.text(row[2])),
+      vat_rate:  to_utf8(N.text(row[4])),
+      stock:     N.decimal(row[10]).to_i,
+      prices:    GRID_CODES.to_h { |g| [g, N.decimal(row[GRID_INDEX[g]])] }
+    }
   end
 
-  def occurrence_counter
-    @occurrence_counter ||= Hash.new(0)
+  def to_utf8(value)
+    return nil if value.nil?
+
+    value.encode("UTF-8", invalid: :replace, undef: :replace)
   end
 
   def upsert_product(reference, row)
