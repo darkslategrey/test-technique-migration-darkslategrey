@@ -106,4 +106,21 @@ RSpec.describe Importer::Normalization do
       expect(described_class.decimal("abc")).to be_nil
     end
   end
+
+  describe ".vat_number" do
+    it "returns nil for nil, empty and blank strings" do
+      expect(described_class.vat_number(nil)).to be_nil
+      expect(described_class.vat_number("")).to be_nil
+      expect(described_class.vat_number("   ")).to be_nil
+    end
+
+    it "removes spaces (including non-breaking ones) and uppercases" do
+      expect(described_class.vat_number("FR 43 313181739")).to eq("FR43313181739")
+      expect(described_class.vat_number("fr\u00a043\u00a0313181739")).to eq("FR43313181739")
+    end
+
+    it "keeps a compact number unchanged" do
+      expect(described_class.vat_number("FR43313181739")).to eq("FR43313181739")
+    end
+  end
 end

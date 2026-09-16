@@ -80,7 +80,7 @@ class Customer::Import::Cavegest < Importer::Base
       kind:              KINDS[N.text(row[COL[:family_code]])],
       customer_category: N.text(row[COL[:family_label]]),
       price_grid_code:   N.text(row[COL[:price_grid]]),
-      vat_number:        N.text(row[COL[:vat]]),
+      vat_number:        N.vat_number(row[COL[:vat]]),
       excise_number:     N.text(row[COL[:excise]])
     )
   end

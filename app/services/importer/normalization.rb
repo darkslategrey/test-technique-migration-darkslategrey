@@ -47,4 +47,16 @@ module Importer::Normalization
 
     normalized.to_f
   end
+
+  # Numéro de TVA : on retire les espaces (insécables compris) pour obtenir un
+  # numéro compact, toutes lettres en majuscules (ex. "FR 43 313181739" ->
+  # "FR43313181739").
+  def vat_number(value)
+    return nil if value.nil?
+
+    str = value.to_s.strip
+    return nil if str.empty?
+
+    str.gsub(/\u00a0|\u202f|\s/, "").upcase
+  end
 end
