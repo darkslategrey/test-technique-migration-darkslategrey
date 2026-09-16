@@ -16,7 +16,6 @@ class ProductPrice::Import::Cavegest < Importer::Base
 
     data_rows.each do |row|
       reference = N.text(row[0])
-      next if reference.nil?
 
       # Une référence partagée par plusieurs lignes est une donnée source à
       # faire trancher par le client : on rejette explicitement, sans inventer
