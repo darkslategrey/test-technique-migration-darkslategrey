@@ -24,7 +24,30 @@ class MigrationReport
   def warnings = issues.select { |issue| issue.level == :warning }
 
   def to_s
-    raise NotImplementedError
+    lines = []
+    lines << "===== Rapport de reprise ====="
+
+    if @counters.empty?
+      lines << "Aucun élément enregistré." unless issues.empty?
+    else
+      @counters.each do |key, value|
+        lines << "- #{format_key(key)} : #{value}"
+      end
+    end
+
+    unless issues.empty?
+      lines << ""
+      lines << "--- Rejetés / à corriger (#{errors.size} erreur(s)) ---"
+      errors.each { |issue| lines << format_issue(issue) }
+    end
+
+    unless warnings.empty?
+      lines << ""
+      lines << "--- À vérifier (#{warnings.size} avertissement(s)) ---"
+      warnings.each { |issue| lines << format_issue(issue) }
+    end
+
+    lines.join("\n") + "\n"
   end
 
   private
@@ -32,5 +55,13 @@ class MigrationReport
   def add(level, source, locator, message, details)
     @issues << Issue.new(level: level, source: source, locator: locator,
                          message: message, details: details)
+  end
+
+  def format_key(key)
+    key.to_s.tr("_", " ").capitalize
+  end
+
+  def format_issue(issue)
+    "[#{issue.source}] #{issue.locator}: #{issue.message}"
   end
 end
