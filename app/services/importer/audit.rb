@@ -34,8 +34,7 @@ class Importer::Audit
   def checks
     [
       -> { unknown_grids_check },
-      -> { count_check("Produits sans aucun prix",
-           Product.left_joins(:product_prices).where(product_prices: { id: nil }).count) },
+      -> { products_without_prices_check },
       -> { count_check("Prix à 0", ProductPrice.where(amount_ht: 0).count) },
       -> { count_check("Stocks négatifs", Product.where("stock < 0").count) },
       -> { count_check("Clients sans email", Customer.where(email: [nil, ""]).count) },
@@ -65,6 +64,14 @@ class Importer::Audit
       lines << "  #{grid} (#{count}) : #{refs.join(", ")}"
     end
     lines.join("\n")
+  end
+
+  def products_without_prices_check
+    products = Product.left_joins(:product_prices).where(product_prices: { id: nil })
+    return nil if products.empty?
+
+    refs = products.order(:reference).pluck(:reference)
+    ["Produits sans aucun prix : #{refs.size}", "  " + refs.join(", ")].join("\n")
   end
 
   def grid_codes
