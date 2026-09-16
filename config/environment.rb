@@ -7,7 +7,6 @@ require "csv"
 require "fileutils"
 require "logger"
 require "roo"
-require "set"
 
 APP_ROOT = File.expand_path("..", __dir__)
 DATA_DIR = File.join(APP_ROOT, "data")
