@@ -14,19 +14,21 @@ class Customer::Import::Cavegest < Importer::Base
   }.freeze
 
   def call
-    imported = 0
+    imported    = 0
+    no_identity = []
 
     rows.each do |row|
       reference = N.text(row[COL[:reference]])
 
-      if reference.nil? || reference == "TOTAL"
-        report.warn(source: "clients", locator: reference, message: "ligne ignorée")
-        next
-      end
+      # Ligne de total : ignorée silencieusement.
+      next if reference == "TOTAL"
+
+      # Lignes vides (sans référence) : ignorées silencieusement.
+      next if reference.nil?
 
       # Ligne avec référence mais sans identité : rejet explicite plutôt qu'échec silencieux.
       unless identifiable?(row)
-        report.warn(source: "clients", locator: reference, message: "aucune identité (nom, prénom ou raison sociale)")
+        no_identity << reference
         next
       end
 
@@ -39,8 +41,12 @@ class Customer::Import::Cavegest < Importer::Base
       end
 
       customer.save!
+      report.count(:customers_imported)
       imported += 1
     end
+
+    report.count(:customers_skipped, no_identity.size)
+    report.warn(source: "clients", locator: no_identity.join(", "), message: "sans identité (nom, prénom ou raison sociale)") unless no_identity.empty?
 
     puts "#{imported} clients importés"
   end
