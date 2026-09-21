@@ -4,17 +4,34 @@ class ProductPrice::Import::Cavegest < Importer::Base
   COLUMN_SEP = ";".freeze
   GRID_CODES = %w[DEPC CHR EXPO PART SALON].freeze
 
-  ENCODING = Encoding::ISO_8859_1
+  # Export Windows français : cp1252 sur le disque, transcodé en UTF-8 à la
+  # lecture. cp1252 couvre aussi l'ISO-8859-1 en pratique (identiques sauf
+  # 0x80-0x9F, contrôles quasi absents d'un vrai fichier latin1), donc une
+  # seule lecture suffit pour les deux. `to_utf8` reste en garde-fou (no-op).
+  ENCODING = "CP1252:UTF-8".freeze
 
   # Taux de TVA -> coefficient de conversion TTC vers HT (grille EXPO).
   VAT_COEFFICIENTS = { 20.0 => 1.2, 5.5 => 1.055 }.freeze
+
+  # Colonnes produit de base attendues (noms d'en-tête CaveGest).
+  # La détection se fait par nom via `column_map`, comme pour les grilles :
+  # un renommage ou une colonne absente lève une erreur explicite au lieu
+  # de corrompre silencieusement l'import.
+  BASE_COLUMNS = {
+    reference: "Ref",
+    name: "Désignation",
+    container: "Contenant",
+    color: "Couleur",
+    vat: "TVA",
+    stock: "Stock"
+  }.freeze
 
   def call
     imported = 0
     rejected = 0
 
     data_rows.each do |row|
-      reference = N.text(row[0])
+      reference = N.text(row[col_index(:reference)])
 
       # Une référence partagée par plusieurs lignes est une donnée source à
       # faire trancher par le client : on rejette explicitement, sans inventer
@@ -46,10 +63,11 @@ class ProductPrice::Import::Cavegest < Importer::Base
   def data_rows
     @data_rows ||= begin
       rows = CSV.read(path, encoding: ENCODING, col_sep: COLUMN_SEP)
-      header_index = rows.index { |r| r[0] == "Ref" }
+      header_index = rows.index { |r| normalize_header(r[0]) == "Ref" }
       raise ArgumentError, "En-tête 'Ref' introuvable dans le fichier #{path}" unless header_index
       @header_row = rows[header_index]
-      raw = rows[(header_index + 1)..]
+      ensure_mapping!
+      raw = rows[(header_index + 1)..] || []
       raw.reject do |r|
         structural?(r) || empty_line?(r)
       end
@@ -62,8 +80,13 @@ class ProductPrice::Import::Cavegest < Importer::Base
 
   # Index dynamique des colonnes de grilles, dérivé de l'en-tête réel.
   def grid_index
-    @grid_index ||= GRID_CODES.to_h do |code|
-      idx = header_row.index(code)
+    @grid_index ||= build_grid_index
+  end
+
+  def build_grid_index
+    normalized = header_row.map { |h| normalize_header(h) }
+    GRID_CODES.to_h do |code|
+      idx = normalized.index(normalize_header(code))
       raise ArgumentError, "Colonne '#{code}' introuvable dans l'en-tête" unless idx
       [code, idx]
     end
@@ -78,7 +101,7 @@ class ProductPrice::Import::Cavegest < Importer::Base
   end
 
   def row_volume_ml(row)
-    volume_ml(row[2])
+    volume_ml(row[col_index(:container)])
   end
 
   # Tous les numéros de référence qui apparaissent plus d'une fois dans
@@ -87,7 +110,7 @@ class ProductPrice::Import::Cavegest < Importer::Base
   def conflict_references
     @conflict_references ||= data_rows
       .each_with_object(Hash.new(0)) do |row, counts|
-        ref = N.text(row[0])
+        ref = N.text(row[col_index(:reference)])
         counts[ref] += 1 if ref
       end
       .select { |_ref, count| count > 1 }
@@ -98,11 +121,11 @@ class ProductPrice::Import::Cavegest < Importer::Base
   # TVA, stocks et tarifs).
   def row_details(row)
     {
-      reference: to_utf8(N.text(row[0])),
-      name:      to_utf8(N.text(row[1])),
-      volume:    to_utf8(N.text(row[2])),
-      vat_rate:  to_utf8(N.text(row[4])),
-      stock:     N.decimal(row[10]).to_i,
+      reference: to_utf8(N.text(row[col_index(:reference)])),
+      name:      to_utf8(N.text(row[col_index(:name)])),
+      volume:    to_utf8(N.text(row[col_index(:container)])),
+      vat_rate:  to_utf8(N.text(row[col_index(:vat)])),
+      stock:     N.decimal(row[col_index(:stock)]).to_i,
       prices:    GRID_CODES.to_h { |g| [g, N.decimal(row[grid_index[g]])] }
     }
   end
@@ -116,11 +139,11 @@ class ProductPrice::Import::Cavegest < Importer::Base
   def upsert_product(reference, row)
     product = Product.find_or_initialize_by(reference: reference)
     product.assign_attributes(
-      name:      N.text(row[1]),
-      color:     N.text(row[3]),
+      name:      N.text(row[col_index(:name)]),
+      color:     N.text(row[col_index(:color)]),
       volume_ml: row_volume_ml(row),
-      vat_rate:  N.decimal(row[4]),
-      stock:     N.decimal(row[10]).to_i
+      vat_rate:  N.decimal(row[col_index(:vat)]),
+      stock:     N.decimal(row[col_index(:stock)]).to_i
     )
     product.save!
     product
@@ -152,5 +175,30 @@ class ProductPrice::Import::Cavegest < Importer::Base
     return nil unless match
 
     (match[1].to_f * 10).to_i
+  end
+
+  def ensure_mapping!
+    @column_map ||= build_column_map
+    grid_index
+  end
+
+  def build_column_map
+    normalized = header_row.map { |h| normalize_header(h) }
+    BASE_COLUMNS.each_with_object({}) do |(key, header_name), map|
+      idx = normalized.index(normalize_header(header_name))
+      unless idx
+        raise ArgumentError, "Colonne '#{header_name}' introuvable dans l'en-tête (en-tête: #{normalized.inspect})"
+      end
+      map[key] = idx
+    end
+  end
+
+  def normalize_header(h)
+    to_utf8(h).to_s.strip.gsub(/\u00A0/, " ").gsub(/\s+/, " ")
+  end
+
+  def col_index(key)
+    ensure_mapping!
+    @column_map[key]
   end
 end

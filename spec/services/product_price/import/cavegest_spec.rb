@@ -66,4 +66,55 @@ RSpec.describe ProductPrice::Import::Cavegest do
     expect(report.counters[:product_conflict]).to eq(12)
     expect(report.warnings.size + report.errors.size).to be >= 12
   end
+
+  context "with header validation" do
+    require "tempfile"
+
+    let(:base_header) { %w[Ref Désignation Contenant Couleur TVA DEPC CHR EXPO PART SALON Stock] }
+
+    def write_tarifs_csv(header, rows)
+      file = Tempfile.new(["tarifs", ".csv"])
+      File.open(file.path, "w:ISO-8859-1") do |f|
+        f.puts "CaveGest 4.2 - Export test".encode("ISO-8859-1")
+        f.puts ""
+        f.puts header.join(";").encode("ISO-8859-1")
+        rows.each { |r| f.puts r.join(";").encode("ISO-8859-1") }
+      end
+      file
+    end
+
+    it "raises an explicit error when a base column is missing" do
+      header = base_header - ["Stock"]
+      file = write_tarifs_csv(header, [["TST001", "Vin Test", "Bouteille - 75.0", "Rouge", "20", "10,00", "20,00", "", "", ""]])
+      expect { described_class.new(file.path).call }.to raise_error(ArgumentError, /Stock/)
+      file.close!
+    end
+
+    it "raises an explicit error when a base column is renamed" do
+      header = base_header.map { |h| h == "Désignation" ? "Designation" : h }
+      file = write_tarifs_csv(header, [["TST001", "Vin Test", "Bouteille - 75.0", "Rouge", "20", "10,00", "20,00", "", "", "", "5"]])
+      expect { described_class.new(file.path).call }.to raise_error(ArgumentError, /Désignation/)
+      file.close!
+    end
+
+    it "raises an explicit error when a grid column is missing" do
+      header = base_header - ["DEPC"]
+      file = write_tarifs_csv(header, [["TST001", "Vin Test", "Bouteille - 75.0", "Rouge", "20", "20,00", "", "", "", "5"]])
+      expect { described_class.new(file.path).call }.to raise_error(ArgumentError, /DEPC/)
+      file.close!
+    end
+
+    it "maps columns by header name when grids are reordered" do
+      header = ["Ref", "Désignation", "Contenant", "Couleur", "TVA", "CHR", "DEPC", "EXPO", "PART", "SALON", "Stock"]
+      row = ["TST999", "Vin Test", "Bouteille - 75.0", "Rouge", "20", "20,00", "10,00", "", "", "", "5"]
+      file = write_tarifs_csv(header, [row])
+      described_class.new(file.path).call
+
+      product = Product.find_by(reference: "TST999")
+      expect(product).not_to be_nil
+      expect(product.product_prices.find_by(grid_code: "DEPC").amount_ht).to eq(10.0)
+      expect(product.product_prices.find_by(grid_code: "CHR").amount_ht).to eq(20.0)
+      file.close!
+    end
+  end
 end
